@@ -2,7 +2,6 @@
 
 import { ArrowUp, Keyboard, Mic, SlidersHorizontal } from "lucide-react";
 import { type ButtonHTMLAttributes, useState } from "react";
-import type { OrbState } from "@/components/orb/orb-presets";
 import { ASSISTANT_NAME } from "@/lib/assistant/config";
 import { cx } from "@/lib/cx";
 import { Waveform } from "./Waveform";
@@ -76,7 +75,8 @@ function Composer({ onSubmit, onCancel }: { onSubmit: (text: string) => void; on
 }
 
 interface VoiceDockProps {
-  state: OrbState;
+  /** The mic is on: listening, or in a voice conversation. Tapping it again turns it off. */
+  micActive: boolean;
   getLevel: () => number;
   onMic: () => void;
   onSubmit: (text: string) => void;
@@ -87,7 +87,7 @@ interface VoiceDockProps {
 }
 
 export function VoiceDock({
-  state,
+  micActive,
   getLevel,
   onMic,
   onSubmit,
@@ -96,8 +96,6 @@ export function VoiceDock({
   statesOpen,
   onStatesToggle,
 }: VoiceDockProps) {
-  const listening = state === "listening";
-
   return (
     <div className="glass flex h-[76px] items-center gap-2 rounded-full px-2.5 sm:gap-4 sm:px-3">
       {typing ? (
@@ -116,8 +114,8 @@ export function VoiceDock({
           <button
             type="button"
             onClick={onMic}
-            data-active={listening}
-            aria-label={listening ? "Stop listening" : "Start listening"}
+            data-active={micActive}
+            aria-label={micActive ? "Stop listening" : "Start listening"}
             className="mic-button focus-ring relative grid size-[60px] shrink-0 place-items-center rounded-full text-white"
           >
             <span className="mic-ring" aria-hidden />

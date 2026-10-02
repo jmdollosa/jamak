@@ -22,6 +22,8 @@ export interface AssistantSnapshot {
   /** True while a state is pinned from the states panel instead of the conversation. */
   previewing: boolean;
   micEnabled: boolean;
+  /** True from the moment the mic control starts a voice conversation until it ends. */
+  voiceActive: boolean;
 }
 
 const PREVIEW_CAPTIONS: Record<OrbState, string> = {
@@ -90,6 +92,7 @@ export class AssistantController {
     userText: null,
     previewing: false,
     micEnabled: true,
+    voiceActive: false,
   };
   private listeners = new Set<() => void>();
   private mic = new MicMeter();
@@ -130,14 +133,12 @@ export class AssistantController {
   };
 
   /**
-   * The mic button: start listening, stop and answer, or interrupt a reply. In a live
-   * conversation it ends the conversation while I'm listening (or still connecting),
-   * and interrupts me while I'm thinking or talking.
+   * The mic button and the orb: starts a voice conversation, or ends the one in progress.
+   * (In the simulated flow it stops listening and answers.)
    */
   toggleMic = () => {
     if (this.voice) {
-      if (this.voice.isOpen && this.snapshot.state !== "listening") this.interrupt();
-      else this.cancel();
+      this.cancel();
       return;
     }
     if (this.snapshot.state === "listening" && !this.snapshot.previewing) {
@@ -202,7 +203,7 @@ export class AssistantController {
   };
 
   private update(patch: Partial<AssistantSnapshot>) {
-    this.snapshot = { ...this.snapshot, ...patch };
+    this.snapshot = { ...this.snapshot, ...patch, voiceActive: this.voice !== null };
     this.listeners.forEach((listener) => listener());
   }
 
@@ -339,16 +340,13 @@ export class AssistantController {
 
   // ---------------------------------------------------------- live conversation
 
-  /** Opens a live speech-to-speech conversation, which runs until it's ended or drops. */
+  /**
+   * Opens a live speech-to-speech conversation, which runs until it's ended or drops.
+   * begin() closes any previous one first, so there's only ever one session and one
+   * microphone stream.
+   */
   private async converse() {
     const run = this.begin();
-    this.update({
-      state: "idle",
-      previewing: false,
-      userText: null,
-      caption: this.caption("Connecting…", "status"),
-    });
-
     const voice = new RealtimeVoice({
       onEvent: (event) => {
         if (run === this.run) this.onVoiceEvent(event);
@@ -356,8 +354,20 @@ export class AssistantController {
       onDisconnect: (error) => {
         if (run === this.run) this.voiceFailed(error);
       },
+      onPlaybackError: (error) => {
+        // Shown unless a reply is on screen; the conversation carries on regardless.
+        if (run === this.run && this.snapshot.caption.tone !== "reply") {
+          this.update({ caption: this.caption(error.message, "notice") });
+        }
+      },
     });
     this.voice = voice;
+    this.update({
+      state: "idle",
+      previewing: false,
+      userText: null,
+      caption: this.caption("Connecting…", "status"),
+    });
 
     try {
       await voice.connect();
@@ -368,7 +378,11 @@ export class AssistantController {
     if (run !== this.run) return;
 
     this.touch();
-    this.update({ state: "listening", caption: this.caption("Listening…", "status") });
+    const blocked = voice.playbackError;
+    this.update({
+      state: "listening",
+      caption: blocked ? this.caption(blocked.message, "notice") : this.caption("Listening…", "status"),
+    });
     this.watchVoice(run);
   }
 
@@ -496,14 +510,6 @@ export class AssistantController {
       state: "listening",
       caption: caption.tone === "reply" ? caption : this.caption("Listening…", "status"),
     });
-  }
-
-  /** Cuts my reply short and goes back to listening. */
-  private interrupt() {
-    if (this.reply) this.voice?.interrupt();
-    this.reply = null;
-    this.touch();
-    this.update({ state: "listening", userText: null, caption: this.caption("Listening…", "status") });
   }
 
   /** Notices when a reply's audio has finished, and hangs up after a long silence. */

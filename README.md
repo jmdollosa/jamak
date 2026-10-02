@@ -16,6 +16,7 @@ npm run dev
 ```
 
 Open http://localhost:3000. Restart `npm run dev` whenever you change `.env.local`.
+(`.env` works too; both are git-ignored.)
 
 | Variable | Required | Default | |
 |---|---|---|---|
@@ -27,12 +28,14 @@ Open http://localhost:3000. Restart `npm run dev` whenever you change `.env.loca
 
 - **Start:** tap the mic button, the orb, or press Space. Allow the microphone when the
   browser asks. The caption shows "Connecting…", then the orb turns cyan: Jamak is listening.
-- **Talk normally.** Jamak notices when you've finished, thinks (violet), and answers
-  out loud (indigo) with the reply written underneath. The conversation keeps going
-  until you end it.
-- **Interrupt** by talking over Jamak, or by tapping the mic while it's thinking or talking.
-- **End** by tapping the mic while Jamak is listening, or pressing Esc. It also hangs up
-  by itself after 90 seconds of quiet.
+  The mic button stays lit for as long as the conversation is open.
+- **Talk normally.** There's nothing to press between sentences: Jamak notices when
+  you've finished, thinks (violet), and answers out loud (indigo) with the reply written
+  underneath. Then it listens again, until you end the conversation.
+- **Interrupt** by talking over Jamak.
+- **End** by tapping the mic button or the orb again, or pressing Esc. This releases the
+  microphone (the browser's mic indicator goes off). Jamak also hangs up by itself after
+  90 seconds of quiet.
 - **Type** with the keyboard button: during a conversation, typed messages join it and
   get a spoken reply.
 
@@ -74,24 +77,35 @@ curl -i -X POST -H 'Content-Type: application/sdp' --data-binary $'v=0\r\n' \
 
 **A conversation.** Use Chrome, Edge or Safari on localhost:
 
-1. Tap the mic, allow the microphone, and wait for "Listening…" (cyan orb).
-2. Say "Hi Jamak, how are you today?" The orb should go violet, then indigo as it
-   answers out loud; your words appear in quotes above the reply.
-3. Ask something longer, and talk over the answer. Jamak should stop and listen.
-4. Tap the mic or press Esc. The orb goes back to idle and the browser's mic indicator turns off.
+1. Click the orb (or the mic button) and allow the microphone. Wait for "Listening…"
+   (cyan orb, lit mic button).
+2. Say "Hi Jamak, how are you today?" and stop talking. The orb should go violet, then
+   indigo as you hear the answer; your words appear in quotes above the reply.
+3. Without pressing anything, ask a follow-up. Jamak should answer it too, with context.
+4. Ask something that needs a long answer, and talk over it. Jamak should stop and listen.
+5. Click the orb again, or press Esc. The orb goes idle and the browser's mic indicator
+   (in the tab or address bar) turns off.
 
-**Errors.** Each should leave the orb idle with an explanation in the caption:
+**Errors.** Each should leave the orb idle (mic button not lit) with an explanation in
+the caption:
 
-- Block the microphone for the site, then tap the mic.
+- Block the microphone for the site, then tap the mic: "Microphone access is blocked…".
+- Unplug or switch off the microphone during a conversation: "Your microphone was disconnected…".
 - Set a wrong `OPENAI_API_KEY` and restart: "OpenAI rejected the server's API key…".
 - Stop `npm run dev` with the page still open, then tap the mic: "I couldn't reach the Jamak server…".
-- Turn off Wi-Fi during a conversation: within about 30 seconds (when the browser gives
-  up on the connection), "The voice connection was lost…".
+- Turn off Wi-Fi during a conversation: within about 15 seconds, "The voice connection was lost…".
+
+Tapping the mic twice quickly should never leave two conversations or two microphone
+streams open: the second tap cancels the first.
 
 ## Troubleshooting
 
 - **Jamak keeps interrupting itself:** it's hearing its own voice through the speakers.
   Use headphones, or lower the volume.
+- **"Your browser paused my voice":** the browser blocked autoplay. Click anywhere on
+  the page and the reply plays. (It shouldn't happen when you start with a click.)
+- **No sound, but the reply text appears:** check the system output device and volume;
+  the reply plays on the browser's default output.
 - **"A firewall or VPN may be blocking it":** WebRTC needs outbound UDP. Try another
   network, or turn off the VPN.
 - **Testing from a phone:** browsers only allow the microphone on https or localhost,

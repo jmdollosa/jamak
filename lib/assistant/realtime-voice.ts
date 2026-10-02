@@ -5,6 +5,8 @@ import { isMicBlocked, MIC_CONSTRAINTS } from "./mic-meter";
 const SESSION_ENDPOINT = "/api/realtime/session";
 /** How long to wait for audio to start flowing once OpenAI has answered. */
 const OPEN_TIMEOUT_MS = 15000;
+/** A connection that stays "disconnected" this long is treated as lost. Chrome only gives up after ~30s. */
+const DISCONNECT_GRACE_MS = 8000;
 /** The assistant's voice arrives louder and steadier than a microphone does. */
 const OUTPUT_GAIN = 5;
 
@@ -16,6 +18,8 @@ export type VoiceErrorCode =
   | "server" // the server or OpenAI refused to start a session
   | "network" // couldn't reach the server, or couldn't connect to OpenAI
   | "dropped" // an open conversation ended unexpectedly
+  | "playback-blocked" // the browser wouldn't autoplay the reply; it resumes on the next click or key press
+  | "playback" // the reply couldn't be played at all
   | "closed"; // close() was called while connecting
 
 /** A voice connection failure whose message can be shown to the user as is. */
@@ -38,8 +42,13 @@ export interface RealtimeServerEvent {
 export interface RealtimeVoiceOptions {
   /** Every server event, as it arrives. */
   onEvent: (event: RealtimeServerEvent) => void;
-  /** An open conversation ended without close() being called, e.g. the network dropped. */
+  /**
+   * An open conversation ended without close() being called: the network dropped,
+   * OpenAI hung up, or the microphone went away.
+   */
   onDisconnect: (error: VoiceError) => void;
+  /** The reply couldn't be played. The conversation stays open. */
+  onPlaybackError?: (error: VoiceError) => void;
   endpoint?: string;
 }
 
@@ -70,11 +79,21 @@ export class RealtimeVoice {
   private speaker: HTMLAudioElement | null = null;
   private inputMeter: LevelMeter | null = null;
   private outputMeter: LevelMeter | null = null;
+  /** Why the session ended while it was still connecting, if something broke rather than close(). */
+  private failure: VoiceError | null = null;
+  private graceTimer: ReturnType<typeof setTimeout> | undefined;
+  private cancelPlaybackRetry: (() => void) | null = null;
+  private playback: VoiceError | null = null;
 
   constructor(private options: RealtimeVoiceOptions) {}
 
   get isOpen() {
     return this.status === "open";
+  }
+
+  /** The current playback problem, if the reply can't be heard right now. */
+  get playbackError() {
+    return this.playback;
   }
 
   /**
@@ -89,7 +108,9 @@ export class RealtimeVoice {
       this.throwIfClosed();
     } catch (error) {
       let failure: VoiceError;
-      if (this.isClosed()) {
+      if (this.failure) {
+        failure = this.failure;
+      } else if (this.isClosed()) {
         failure = closedWhileConnecting();
       } else if (error instanceof VoiceError) {
         failure = error;
@@ -186,6 +207,9 @@ export class RealtimeVoice {
     this.throwIfClosed();
     const [track] = mic.getAudioTracks();
     if (!track) throw new VoiceError("mic-unavailable", "I couldn't find a microphone to use.");
+    // Fires if the device is unplugged or taken over, not when we stop the track ourselves.
+    track.onended = () =>
+      this.fail(new VoiceError("mic-unavailable", "Your microphone was disconnected. Tap the mic to start again."));
     this.inputMeter = new LevelMeter(context, mic);
 
     const peer = new RTCPeerConnection();
@@ -201,7 +225,7 @@ export class RealtimeVoice {
     peer.ontrack = ({ track: remote, streams }) => {
       const stream = streams[0] ?? new MediaStream([remote]);
       speaker.srcObject = stream;
-      speaker.play().catch((error) => console.warn("[RealtimeVoice] The reply couldn't play:", error));
+      this.play();
       this.outputMeter?.disconnect();
       this.outputMeter = new LevelMeter(context, stream, OUTPUT_GAIN);
     };
@@ -220,9 +244,59 @@ export class RealtimeVoice {
     this.throwIfClosed();
     await this.whenOpen(peer, channel);
 
-    channel.onclose = () => this.drop("The voice connection ended. Tap the mic to start again.");
+    channel.onclose = () =>
+      this.fail(new VoiceError("dropped", "The voice connection ended. Tap the mic to start again."));
     peer.onconnectionstatechange = () => {
-      if (peer.connectionState === "failed") this.drop("The voice connection was lost. Tap the mic to start again.");
+      const lost = () =>
+        this.fail(new VoiceError("dropped", "The voice connection was lost. Tap the mic to start again."));
+      clearTimeout(this.graceTimer);
+      // "disconnected" can recover by itself (e.g. a Wi-Fi hiccup), so give it a moment.
+      if (peer.connectionState === "failed") lost();
+      else if (peer.connectionState === "disconnected") this.graceTimer = setTimeout(lost, DISCONNECT_GRACE_MS);
+    };
+  }
+
+  private play() {
+    this.speaker?.play().then(
+      () => {
+        this.playback = null;
+      },
+      (error: unknown) => this.playbackFailed(error),
+    );
+  }
+
+  private playbackFailed(error: unknown) {
+    if (this.isClosed()) return;
+    const name = error instanceof DOMException ? error.name : "";
+    // Superseded by a newer stream, or paused while closing.
+    if (name === "AbortError") return;
+
+    if (name === "NotAllowedError") {
+      this.playback = new VoiceError("playback-blocked", "Your browser paused my voice. Click anywhere on the page to hear me.");
+      this.retryPlaybackOnGesture();
+    } else {
+      console.error("[RealtimeVoice] The reply couldn't play:", error);
+      this.playback = new VoiceError(
+        "playback",
+        "I couldn't play my voice. Check your sound output, or try another browser.",
+      );
+    }
+    this.options.onPlaybackError?.(this.playback);
+  }
+
+  /** Autoplay was refused; browsers allow playback again after the next click or key press. */
+  private retryPlaybackOnGesture() {
+    if (this.cancelPlaybackRetry) return;
+    const retry = () => {
+      this.cancelPlaybackRetry?.();
+      this.play();
+    };
+    window.addEventListener("click", retry, true);
+    window.addEventListener("keydown", retry, true);
+    this.cancelPlaybackRetry = () => {
+      window.removeEventListener("click", retry, true);
+      window.removeEventListener("keydown", retry, true);
+      this.cancelPlaybackRetry = null;
     };
   }
 
@@ -289,12 +363,20 @@ export class RealtimeVoice {
     if (isServerEvent(event)) this.options.onEvent(event);
   }
 
-  /** The conversation ended on its own after it was open. */
-  private drop(message: string) {
-    if (this.status !== "open") return;
-    this.status = "closed";
-    this.teardown();
-    this.options.onDisconnect(new VoiceError("dropped", message));
+  /**
+   * Ends the session because something broke. While connecting, connect() rejects with
+   * the error; once open, it's reported through onDisconnect.
+   */
+  private fail(error: VoiceError) {
+    if (this.status === "connecting") {
+      this.failure = error;
+      this.status = "closed";
+      this.teardown();
+    } else if (this.status === "open") {
+      this.status = "closed";
+      this.teardown();
+      this.options.onDisconnect(error);
+    }
   }
 
   // A method rather than a comparison, so TypeScript doesn't narrow `status` across awaits.
@@ -308,6 +390,8 @@ export class RealtimeVoice {
 
   private teardown() {
     this.abort.abort();
+    clearTimeout(this.graceTimer);
+    this.cancelPlaybackRetry?.();
     const { channel, peer, mic, speaker, context } = this;
     if (channel) {
       channel.onmessage = null;
@@ -319,7 +403,10 @@ export class RealtimeVoice {
       peer.onconnectionstatechange = null;
       peer.close();
     }
-    mic?.getTracks().forEach((track) => track.stop());
+    mic?.getTracks().forEach((track) => {
+      track.onended = null;
+      track.stop();
+    });
     if (speaker) {
       speaker.pause();
       speaker.srcObject = null;

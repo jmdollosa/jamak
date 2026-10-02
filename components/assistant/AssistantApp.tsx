@@ -78,8 +78,9 @@ function CaptionBlock({ caption, userText }: { caption: Caption; userText: strin
 }
 
 export function AssistantApp() {
-  const { state, caption, userText, micEnabled, controller } = useAssistant();
+  const { state, caption, userText, micEnabled, voiceActive, controller } = useAssistant();
   const meta = ORB_STATE_META[state];
+  const micActive = voiceActive || state === "listening";
 
   const [compact, setCompact] = useState(false);
   const [compactTransform, setCompactTransform] = useState<string>();
@@ -173,7 +174,7 @@ export function AssistantApp() {
               type="button"
               onClick={controller.toggleMic}
               tabIndex={compact ? 0 : -1}
-              aria-label={state === "listening" ? "Stop listening" : `Talk to ${ASSISTANT_NAME}`}
+              aria-label={micActive ? "Stop listening" : `Talk to ${ASSISTANT_NAME}`}
               className="focus-ring absolute inset-[6%] cursor-pointer rounded-full"
             />
           </div>
@@ -204,7 +205,7 @@ export function AssistantApp() {
             />
           )}
           <VoiceDock
-            state={state}
+            micActive={micActive}
             getLevel={controller.getLevel}
             onMic={controller.toggleMic}
             onSubmit={controller.submit}
