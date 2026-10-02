@@ -23,6 +23,9 @@ Open http://localhost:3000. Restart `npm run dev` whenever you change `.env.loca
 | `OPENAI_API_KEY` | yes | | Read only by the server. Never prefix it with `NEXT_PUBLIC_`. |
 | `OPENAI_REALTIME_MODEL` | no | `gpt-realtime-2.1` | |
 | `OPENAI_REALTIME_VOICE` | no | `marin` | e.g. `cedar`, `coral`, `sage` |
+| `AI_CORE_URL` | no | | Jamak AI Core, for long-term memory (see [Memory](#memory)) |
+| `AI_CORE_API_KEY` | with `AI_CORE_URL` | | One of the AI Core's `API_KEYS` |
+| `JAMAK_USER_ID` | with `AI_CORE_URL` | | Whose memories these are; a fixed id while Jamak has a single user |
 
 ## Talking to Jamak
 
@@ -173,3 +176,30 @@ streams open: the second tap cancels the first.
 - The app now needs a Node.js server (`npm run build && npm start`, Vercel, Railway…),
   not static hosting.
 - Realtime audio is billed per use; see OpenAI's pricing.
+
+## Memory
+
+With Jamak AI Core running (the `jamak-ai-core` project) and the three `AI_CORE_*` /
+`JAMAK_USER_ID` variables set, Jamak remembers things between conversations. Without
+them it works as before, without memories. Memory never holds up a conversation: if
+the AI Core is slow or down, Jamak just talks without it, and the server logs say why
+(`[memory] …`).
+
+- **When a conversation starts**, the server asks the AI Core what's most relevant
+  about you (your projects, preferences, people…) and adds it to Jamak's
+  instructions. This adds about 0.3 s to connecting (`server/memory/session.ts`).
+- **During the conversation**, Jamak can look things up itself with its
+  `recall_memories` tool when you mention something from the past. The caption shows
+  "Remembering…" while it does (`lib/assistant/memory.ts`, `app/api/memory/recall`).
+- **What you say is remembered.** The transcript of the conversation (your speech or
+  typing, and Jamak's replies) goes to the AI Core in batches of 8 messages, and the
+  rest when the conversation ends or the page is closed (`app/api/memory/remember`).
+  The AI Core decides in the background what's worth keeping; most small talk isn't.
+  Each message is sent with its Realtime item id, so nothing is processed twice.
+- **How Jamak uses its memories** is part of its personality: see `# Memory` in
+  `config/personality.md`.
+
+Only this app's server talks to the AI Core, with its API key and `JAMAK_USER_ID`; the
+browser never sees either. The `/api/memory/*` routes have no sign-in, which is fine
+while Jamak runs on your own machine for you alone. Add authentication, and use the
+signed-in user's id instead of `JAMAK_USER_ID`, before anyone else can reach the app.

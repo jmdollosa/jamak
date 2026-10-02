@@ -1,4 +1,5 @@
 import type { OrbState } from "@/components/orb/orb-presets";
+import { ConversationRecorder, RECALL_MEMORIES_TOOL, recallMemories } from "./memory";
 import { MicMeter } from "./mic-meter";
 import { replyFor } from "./mock-replies";
 import { type RealtimeServerEvent, RealtimeVoice, VoiceError } from "./realtime-voice";
@@ -87,6 +88,9 @@ function captionTail(text: string) {
  * with the OpenAI Realtime API (see realtime-voice.ts) that continues until it's ended.
  * The states panel, the sample conversation and the mic-off mode still use the
  * simulated flow, with mock replies and a synthetic voice.
+ *
+ * Live conversations use Jamak's long-term memory (memory.ts): Jamak can recall what it
+ * knows mid-conversation, and what's said is sent to the AI Core to learn from.
  */
 export class AssistantController {
   private snapshot: AssistantSnapshot = {
@@ -101,6 +105,8 @@ export class AssistantController {
   private mic = new MicMeter();
   private liveMic = false;
   private voice: RealtimeVoice | null = null;
+  /** Records the live conversation for Jamak's memory; one per conversation. */
+  private memory: ConversationRecorder | null = null;
   private phase: VoicePhase = "idle";
   private reply: LiveReply | null = null;
   private userSpeaking = false;
@@ -226,6 +232,8 @@ export class AssistantController {
     this.timers.clear();
     this.liveMic = false;
     this.mic.stop();
+    this.memory?.finish();
+    this.memory = null;
     this.voice?.close();
     this.voice = null;
     this.phase = "idle";
@@ -379,6 +387,7 @@ export class AssistantController {
       },
     });
     this.voice = voice;
+    this.memory = new ConversationRecorder();
     this.setPhase("connecting", {
       previewing: false,
       userText: null,
@@ -413,6 +422,7 @@ export class AssistantController {
   }
 
   private onVoiceEvent(event: RealtimeServerEvent) {
+    this.memory?.handle(event);
     switch (event.type) {
       // The session is ready, so OpenAI is hearing the microphone from here on.
       case "session.created":
@@ -495,11 +505,27 @@ export class AssistantController {
         this.onReplyDone(event.response);
         break;
 
+      // Jamak wants to look something up in its memory (server/memory/session.ts).
+      case "response.function_call_arguments.done":
+        if (event.name === RECALL_MEMORIES_TOOL) void this.recall(str(event.call_id), str(event.arguments));
+        break;
+
       case "error":
         // Usually a client event OpenAI couldn't apply; the conversation carries on.
         console.warn("[Jamak] Realtime error:", event.error);
         break;
     }
+  }
+
+  /** Answers Jamak's recall_memories call, then lets it carry on with its reply. */
+  private async recall(callId: string, args: string) {
+    const voice = this.voice;
+    if (!voice || !callId) return;
+    if (this.phase === "thinking") this.update({ caption: this.caption("Remembering…", "status") });
+    const memories = await recallMemories(args);
+    if (voice !== this.voice || !voice.isOpen) return;
+    // If the user has started talking again, the reply waits for what they say next.
+    voice.sendToolResult(callId, memories, !this.userSpeaking);
   }
 
   private isCurrentReply(responseId: unknown) {

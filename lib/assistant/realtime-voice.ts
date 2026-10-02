@@ -142,6 +142,18 @@ export class RealtimeVoice {
     );
   }
 
+  /**
+   * Answers a function call from the model with its result, then asks it to carry on with
+   * its reply (unless `respond` is false, e.g. because the user has started talking).
+   */
+  sendToolResult(callId: string, output: string, respond = true) {
+    const sent = this.send({
+      type: "conversation.item.create",
+      item: { type: "function_call_output", call_id: callId, output },
+    });
+    return sent && (!respond || this.send({ type: "response.create" }));
+  }
+
   /** Stops the reply that's being generated or played. */
   interrupt() {
     this.send({ type: "response.cancel" });

@@ -1,4 +1,5 @@
 import "server-only";
+import { sessionMemory } from "@/server/memory/session";
 import { loadPersonality } from "./personality";
 
 /**
@@ -57,14 +58,21 @@ function voiceConfig() {
 }
 
 /**
- * The full session config: voice settings plus the current personality as instructions.
+ * The full session config: voice settings, the current personality as instructions,
+ * and Jamak's memory (what it already knows about the user, and a tool to recall more;
+ * see server/memory/session.ts). Without memory set up, it's voice and personality only.
  *
  * Instructions can also be changed on a live session with a `session.update` event
  * (`{ type: "session.update", session: { type: "realtime", instructions } }`), which is
  * how personality edits could later reach a conversation that's already running.
  */
 async function sessionConfig() {
-  return { ...voiceConfig(), instructions: await loadPersonality() };
+  const [personality, memory] = await Promise.all([loadPersonality(), sessionMemory()]);
+  return {
+    ...voiceConfig(),
+    instructions: [personality, memory.instructions].filter(Boolean).join("\n\n"),
+    ...(memory.tools.length > 0 && { tools: memory.tools, tool_choice: "auto" }),
+  };
 }
 
 /** What the browser is told when OpenAI refuses. */
