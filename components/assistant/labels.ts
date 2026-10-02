@@ -1,4 +1,5 @@
 import type { OrbState } from "@/components/orb/orb-presets";
+import type { VoicePhase } from "@/lib/assistant/voice-phase";
 
 /** Short status shown in the sidebar pill and the compact bar. */
 export const STATUS_LABEL: Record<OrbState, string> = {
@@ -9,3 +10,8 @@ export const STATUS_LABEL: Record<OrbState, string> = {
   empathetic: "Speaking…",
   success: "Done",
 };
+
+/** The status for what the orb shows, except while a conversation is still connecting. */
+export function statusLabel(state: OrbState, phase: VoicePhase) {
+  return phase === "connecting" ? "Connecting…" : STATUS_LABEL[state];
+}

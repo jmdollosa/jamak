@@ -1,9 +1,7 @@
 "use client";
 
 import { Maximize2 } from "lucide-react";
-import type { OrbState } from "@/components/orb/orb-presets";
 import { ASSISTANT_NAME } from "@/lib/assistant/config";
-import { STATUS_LABEL } from "./labels";
 
 /** Diameter of the docked orb and its distance from the viewport corner, in px. */
 export const COMPACT_ORB = 72;
@@ -13,12 +11,13 @@ const GAP = 14;
 
 interface CompactBarProps {
   visible: boolean;
-  state: OrbState;
+  /** Short status for the conversation, e.g. "Listening…". */
+  status: string;
   onExpand: () => void;
 }
 
 /** The status pill that sits beside the orb when it's docked in the corner. */
-export function CompactBar({ visible, state, onExpand }: CompactBarProps) {
+export function CompactBar({ visible, status, onExpand }: CompactBarProps) {
   return (
     <div
       inert={!visible}
@@ -30,7 +29,7 @@ export function CompactBar({ visible, state, onExpand }: CompactBarProps) {
     >
       <div className="glass flex items-center rounded-full py-1.5 pl-4 pr-1.5" style={{ height: BAR_HEIGHT }}>
         <span className="status-dot mr-2.5 size-1.5 rounded-full" aria-hidden />
-        <span className="text-[13px] text-frost/90">{STATUS_LABEL[state]}</span>
+        <span className="text-[13px] text-frost/90">{status}</span>
         <button
           type="button"
           onClick={onExpand}

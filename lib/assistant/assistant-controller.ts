@@ -3,6 +3,7 @@ import { MicMeter } from "./mic-meter";
 import { replyFor } from "./mock-replies";
 import { type RealtimeServerEvent, RealtimeVoice, VoiceError } from "./realtime-voice";
 import { simulatedVoiceLevel, speechLevel } from "./synthetic-voice";
+import { ORB_STATE_FOR_PHASE, type VoicePhase } from "./voice-phase";
 
 export const DEFAULT_PROMPT = "I'm your AI personal assistant. How can I help you today?";
 
@@ -15,6 +16,7 @@ export interface Caption {
 }
 
 export interface AssistantSnapshot {
+  /** What the orb shows. In a live conversation it follows `voicePhase`. */
   state: OrbState;
   caption: Caption;
   /** What the user typed or said, shown above the reply. */
@@ -22,8 +24,8 @@ export interface AssistantSnapshot {
   /** True while a state is pinned from the states panel instead of the conversation. */
   previewing: boolean;
   micEnabled: boolean;
-  /** True from the moment the mic control starts a voice conversation until it ends. */
-  voiceActive: boolean;
+  /** Where the live voice conversation is; "idle" when there isn't one. */
+  voicePhase: VoicePhase;
 }
 
 const PREVIEW_CAPTIONS: Record<OrbState, string> = {
@@ -47,7 +49,8 @@ const VOICE_IDLE_MS = 90000;
 const REPLY_TAIL_MS = 1200;
 /** …or after this long if its audio never registered on the level meter. */
 const REPLY_FALLBACK_MS = 15000;
-const REPLY_QUIET_LEVEL = 0.04;
+/** Below this, Jamak's voice counts as silent. */
+const OUTPUT_QUIET_LEVEL = 0.04;
 /** About what fits in the three-line caption on a narrow screen. */
 const CAPTION_CHARS = 160;
 
@@ -92,12 +95,13 @@ export class AssistantController {
     userText: null,
     previewing: false,
     micEnabled: true,
-    voiceActive: false,
+    voicePhase: "idle",
   };
   private listeners = new Set<() => void>();
   private mic = new MicMeter();
   private liveMic = false;
   private voice: RealtimeVoice | null = null;
+  private phase: VoicePhase = "idle";
   private reply: LiveReply | null = null;
   private userSpeaking = false;
   private lastActivity = 0;
@@ -121,7 +125,11 @@ export class AssistantController {
     const t = performance.now() / 1000;
     switch (this.snapshot.state) {
       case "listening":
-        if (this.voice) return this.voice.inputLevel();
+        if (this.voice) {
+          // While Jamak's own voice is still audible (its last words, or echo reaching the
+          // microphone), don't let it look as if the user is talking.
+          return this.voice.outputLevel() > OUTPUT_QUIET_LEVEL ? 0 : this.voice.inputLevel();
+        }
         return this.liveMic ? this.mic.read() : simulatedVoiceLevel(t);
       case "speaking":
         return this.voice ? this.voice.outputLevel() : speechLevel(t);
@@ -158,7 +166,7 @@ export class AssistantController {
       this.reply = null;
       this.voice.sendText(message);
       this.touch();
-      this.update({ state: "thinking", userText: message, caption: this.caption("Thinking…", "status") });
+      this.setPhase("thinking", { userText: message, caption: this.caption("Thinking…", "status") });
       return;
     }
 
@@ -203,7 +211,7 @@ export class AssistantController {
   };
 
   private update(patch: Partial<AssistantSnapshot>) {
-    this.snapshot = { ...this.snapshot, ...patch, voiceActive: this.voice !== null };
+    this.snapshot = { ...this.snapshot, ...patch, voicePhase: this.phase };
     this.listeners.forEach((listener) => listener());
   }
 
@@ -220,6 +228,7 @@ export class AssistantController {
     this.mic.stop();
     this.voice?.close();
     this.voice = null;
+    this.phase = "idle";
     this.reply = null;
     this.userSpeaking = false;
     return this.run;
@@ -339,6 +348,14 @@ export class AssistantController {
   }
 
   // ---------------------------------------------------------- live conversation
+  //
+  // The conversation's phase (voice-phase.ts) follows OpenAI Realtime events, and the
+  // orb shows each phase with one of its existing states.
+
+  private setPhase(phase: VoicePhase, patch: Partial<AssistantSnapshot> = {}) {
+    this.phase = phase;
+    this.update({ ...patch, state: ORB_STATE_FOR_PHASE[phase] });
+  }
 
   /**
    * Opens a live speech-to-speech conversation, which runs until it's ended or drops.
@@ -362,8 +379,7 @@ export class AssistantController {
       },
     });
     this.voice = voice;
-    this.update({
-      state: "idle",
+    this.setPhase("connecting", {
       previewing: false,
       userText: null,
       caption: this.caption("Connecting…", "status"),
@@ -377,12 +393,8 @@ export class AssistantController {
     }
     if (run !== this.run) return;
 
+    // Connected. Listening starts with OpenAI's session.created.
     this.touch();
-    const blocked = voice.playbackError;
-    this.update({
-      state: "listening",
-      caption: blocked ? this.caption(blocked.message, "notice") : this.caption("Listening…", "status"),
-    });
     this.watchVoice(run);
   }
 
@@ -390,8 +402,7 @@ export class AssistantController {
     if (error instanceof VoiceError && error.code === "closed") return;
     console.warn("[Jamak] Voice conversation ended:", error);
     this.begin();
-    this.update({
-      state: "idle",
+    this.setPhase("error", {
       previewing: false,
       userText: null,
       caption: this.caption(
@@ -401,23 +412,38 @@ export class AssistantController {
     });
   }
 
-  /** Maps Realtime server events onto the orb's states and the caption. */
   private onVoiceEvent(event: RealtimeServerEvent) {
     switch (event.type) {
-      case "input_audio_buffer.speech_started":
-        // If I was answering, OpenAI stops the reply (the user talked over it); anything
-        // still arriving for it is ignored.
+      // The session is ready, so OpenAI is hearing the microphone from here on.
+      case "session.created":
+        if (this.phase === "connecting") {
+          const blocked = this.voice?.playbackError;
+          this.touch();
+          this.setPhase("listening", {
+            caption: blocked ? this.caption(blocked.message, "notice") : this.caption("Listening…", "status"),
+          });
+        }
+        break;
+
+      case "input_audio_buffer.speech_started": {
+        // Talking over a reply, even one still being prepared, interrupts it: OpenAI
+        // cancels it and stops its audio, and anything still arriving for it is ignored.
+        const interrupting = this.reply !== null || this.phase === "speaking";
         this.userSpeaking = true;
         this.reply = null;
         this.touch();
-        this.update({ state: "listening", userText: null, caption: this.caption("Listening…", "status") });
+        this.setPhase(interrupting ? "interrupted" : "listening", {
+          userText: null,
+          caption: this.caption("Listening…", "status"),
+        });
         break;
+      }
 
       case "input_audio_buffer.speech_stopped":
         this.userSpeaking = false;
         this.touch();
-        if (this.snapshot.state === "listening") {
-          this.update({ state: "thinking", caption: this.caption("Thinking…", "status") });
+        if (this.phase === "listening" || this.phase === "interrupted") {
+          this.setPhase("thinking", { caption: this.caption("Thinking…", "status") });
         }
         break;
 
@@ -437,29 +463,36 @@ export class AssistantController {
           quietSince: performance.now(),
         };
         this.touch();
-        if (this.snapshot.state === "listening") {
-          this.update({ state: "thinking", caption: this.caption("Thinking…", "status") });
+        if (this.phase === "listening" || this.phase === "interrupted") {
+          this.setPhase("thinking", { caption: this.caption("Thinking…", "status") });
         }
         break;
 
       case "response.output_audio_transcript.delta":
         if (this.reply && this.isCurrentReply(event.response_id)) {
           this.reply.text += str(event.delta);
-          this.showReply(this.reply);
+          // The words arrive a little ahead of the audio; they appear once it starts playing.
+          if (this.phase === "speaking") this.showReply(this.reply);
         }
         break;
 
+      // WebRTC only: OpenAI has started playing the reply to us.
       case "output_audio_buffer.started":
-        if (this.isCurrentReply(event.response_id)) this.update({ state: "speaking" });
+        if (this.reply && this.isCurrentReply(event.response_id)) this.startSpeaking(this.reply);
+        break;
+
+      // WebRTC only: the reply has finished playing.
+      case "output_audio_buffer.stopped":
+        if (this.isCurrentReply(event.response_id)) this.finishReply();
+        break;
+
+      // WebRTC only: the reply's audio was cut off before the end.
+      case "output_audio_buffer.cleared":
+        if (this.isCurrentReply(event.response_id)) this.replyInterrupted();
         break;
 
       case "response.done":
         this.onReplyDone(event.response);
-        break;
-
-      // WebRTC only: OpenAI has finished playing the reply out to us.
-      case "output_audio_buffer.stopped":
-        if (this.isCurrentReply(event.response_id)) this.finishReply();
         break;
 
       case "error":
@@ -473,6 +506,13 @@ export class AssistantController {
     return this.reply !== null && (typeof responseId !== "string" || responseId === this.reply.id);
   }
 
+  private startSpeaking(reply: LiveReply) {
+    if (this.phase === "speaking") return;
+    this.touch();
+    this.setPhase("speaking");
+    this.showReply(reply);
+  }
+
   private showReply(reply: LiveReply) {
     const text = captionTail(reply.text.trim());
     if (!text) return;
@@ -480,7 +520,7 @@ export class AssistantController {
     const current = this.snapshot.caption;
     const caption = current.id === reply.captionId ? { ...current, text } : this.caption(text, "reply");
     reply.captionId = caption.id;
-    this.update({ state: "speaking", caption });
+    this.update({ caption });
   }
 
   private onReplyDone(response: unknown) {
@@ -491,28 +531,43 @@ export class AssistantController {
     if (status === "failed") {
       console.warn("[Jamak] The reply failed:", field(response, "status_details"));
       this.reply = null;
-      this.update({ state: "listening", caption: this.caption("I couldn't answer that. Could you say it again?", "notice") });
+      this.setPhase("listening", { caption: this.caption("I couldn't answer that. Could you say it again?", "notice") });
     } else if (status === "cancelled") {
-      this.finishReply();
+      this.replyInterrupted();
     } else {
+      // Generated, but the audio may still be playing; output_audio_buffer.stopped ends it.
       reply.generated = true;
       this.touch();
     }
   }
 
-  /** The reply has been spoken: listen for the next turn, leaving its caption up to read. */
+  /** The reply has finished playing: listen for the next turn, leaving its words up to read. */
   private finishReply() {
+    const reply = this.reply;
     this.reply = null;
     this.touch();
-    const { state, caption } = this.snapshot;
-    if (state === "listening") return;
-    this.update({
-      state: "listening",
+    if (this.phase !== "speaking" && this.phase !== "thinking") return;
+    // Shows the complete reply, including if its audio never registered.
+    if (reply) this.showReply(reply);
+    const { caption } = this.snapshot;
+    this.setPhase("listening", {
       caption: caption.tone === "reply" ? caption : this.caption("Listening…", "status"),
     });
   }
 
-  /** Notices when a reply's audio has finished, and hangs up after a long silence. */
+  /** The reply was cut off or cancelled before it finished. */
+  private replyInterrupted() {
+    this.reply = null;
+    this.touch();
+    if (this.phase === "speaking" || this.phase === "thinking") {
+      this.setPhase("interrupted", { caption: this.caption("Listening…", "status") });
+    }
+  }
+
+  /**
+   * Backs up the WebRTC playback events with the measured reply audio, which matters
+   * because output_audio_buffer.stopped can arrive late; and hangs up after a long silence.
+   */
   private watchVoice(run: number) {
     const id = setInterval(() => {
       const voice = this.voice;
@@ -521,10 +576,10 @@ export class AssistantController {
       const reply = this.reply;
 
       if (reply) {
-        // output_audio_buffer.stopped normally ends the reply; this covers it arriving late.
-        if (voice.outputLevel() > REPLY_QUIET_LEVEL) {
+        if (voice.outputLevel() > OUTPUT_QUIET_LEVEL) {
           reply.heard = true;
           reply.quietSince = now;
+          if (this.phase === "thinking") this.startSpeaking(reply);
         }
         if (reply.generated && now - reply.quietSince > (reply.heard ? REPLY_TAIL_MS : REPLY_FALLBACK_MS)) {
           this.finishReply();

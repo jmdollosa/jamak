@@ -27,7 +27,8 @@ Open http://localhost:3000. Restart `npm run dev` whenever you change `.env.loca
 ## Talking to Jamak
 
 - **Start:** tap the mic button, the orb, or press Space. Allow the microphone when the
-  browser asks. The caption shows "Connecting…", then the orb turns cyan: Jamak is listening.
+  browser asks. The orb turns violet while it connects ("Connecting…"), then cyan: Jamak
+  is listening.
   The mic button stays lit for as long as the conversation is open.
 - **Talk normally.** There's nothing to press between sentences: Jamak notices when
   you've finished, thinks (violet), and answers out loud (indigo) with the reply written
@@ -91,8 +92,28 @@ voice settings (model, voice, turn detection, transcription) ──────�
 | `server/voice/realtime.ts` | Voice configuration, and starting a session with OpenAI. |
 | `app/api/realtime/session/route.ts` | The HTTP endpoint the browser calls to start a conversation. |
 | `lib/assistant/realtime-voice.ts` | `RealtimeVoice`: one WebRTC conversation. Microphone, playback, event channel, voice levels, errors. |
-| `lib/assistant/assistant-controller.ts` | Maps Realtime events onto the orb states and captions; handles interrupting, hanging up and errors. |
+| `lib/assistant/voice-phase.ts` | The conversation's phases, and which existing orb state shows each one. |
+| `lib/assistant/assistant-controller.ts` | Moves between phases on Realtime events; captions, interrupting, hanging up and errors. |
 | `lib/assistant/level-meter.ts` | Loudness of the mic and of Jamak's voice, which drives the orb and the waveforms. |
+
+### What the orb shows
+
+The orb follows the live conversation's phase, driven by OpenAI Realtime events and
+the measured audio, using its existing states and colors:
+
+| Phase | Orb | Entered on |
+|---|---|---|
+| connecting | thinking (violet) | tapping the orb or mic |
+| listening | listening (cyan), moving with your voice | `session.created`; `input_audio_buffer.speech_started`; a reply finishing |
+| thinking | thinking (violet) | `input_audio_buffer.speech_stopped`, `response.created` |
+| speaking | speaking (indigo), moving with Jamak's voice | `output_audio_buffer.started`, or Jamak's audio becoming audible |
+| interrupted | listening (cyan) | talking over a reply; `output_audio_buffer.cleared`; a cancelled `response.done` |
+| idle | idle (blue) | ending the conversation; hanging up after 90 seconds of quiet |
+| error | idle (blue), with the reason in the caption | a refused or failed connection, a denied microphone, a dropped connection |
+
+A reply ends on `output_audio_buffer.stopped`, or, if that's late, once Jamak's audio
+has gone quiet after `response.done`. Change how a phase looks in `ORB_STATE_FOR_PHASE`
+(`lib/assistant/voice-phase.ts`).
 
 ## Testing
 

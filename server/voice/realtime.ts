@@ -37,6 +37,10 @@ function voiceConfig() {
     output_modalities: ["audio"],
     audio: {
       input: {
+        // Filters the microphone before turn detection hears it. "far_field" suits laptop
+        // microphones, which also pick up Jamak's voice from the speakers; the browser's
+        // echo cancellation removes most of that before it gets here.
+        noise_reduction: { type: "far_field" },
         transcription: { model: TRANSCRIPTION_MODEL },
         // OpenAI decides when the user has finished a thought, replies on its own, and
         // stops talking if the user talks over it.

@@ -6,8 +6,10 @@ import { ORB_STATE_META, ORB_STATES } from "@/components/orb/orb-presets";
 import type { Caption } from "@/lib/assistant/assistant-controller";
 import { ASSISTANT_NAME, USER_NAME } from "@/lib/assistant/config";
 import { useAssistant } from "@/lib/assistant/use-assistant";
+import { isVoiceActive } from "@/lib/assistant/voice-phase";
 import { cx } from "@/lib/cx";
 import { COMPACT_MARGIN, COMPACT_ORB, CompactBar } from "./CompactBar";
+import { statusLabel } from "./labels";
 import { Sidebar } from "./Sidebar";
 import { StatesPanel } from "./StatesPanel";
 import { TitleBar } from "./TitleBar";
@@ -78,9 +80,10 @@ function CaptionBlock({ caption, userText }: { caption: Caption; userText: strin
 }
 
 export function AssistantApp() {
-  const { state, caption, userText, micEnabled, voiceActive, controller } = useAssistant();
+  const { state, caption, userText, micEnabled, voicePhase, controller } = useAssistant();
   const meta = ORB_STATE_META[state];
-  const micActive = voiceActive || state === "listening";
+  const micActive = isVoiceActive(voicePhase) || state === "listening";
+  const status = statusLabel(state, voicePhase);
 
   const [compact, setCompact] = useState(false);
   const [compactTransform, setCompactTransform] = useState<string>();
@@ -153,7 +156,7 @@ export function AssistantApp() {
       style={{ "--aura": meta.aura, "--aura-2": meta.aura2 } as CSSProperties}
     >
       <TitleBar inert={compact} onCompact={enterCompact} />
-      <Sidebar inert={compact} state={state} getLevel={controller.getLevel} />
+      <Sidebar inert={compact} status={status} getLevel={controller.getLevel} />
 
       <main className="relative flex min-h-0 flex-1 flex-col items-center justify-center px-4 pb-[5vh]">
         <div ref={slotRef} className="orb-slot relative shrink-0">
@@ -217,7 +220,7 @@ export function AssistantApp() {
         </div>
       </main>
 
-      <CompactBar visible={compact} state={state} onExpand={exitCompact} />
+      <CompactBar visible={compact} status={status} onExpand={exitCompact} />
     </div>
   );
 }

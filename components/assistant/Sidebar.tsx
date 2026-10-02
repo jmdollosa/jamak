@@ -2,8 +2,6 @@
 
 import { Calendar, Folder, House, NotebookPen, Settings, SquareCheckBig } from "lucide-react";
 import Link from "next/link";
-import type { OrbState } from "@/components/orb/orb-presets";
-import { STATUS_LABEL } from "./labels";
 import { Waveform } from "./Waveform";
 
 // Only Home exists for now; the rest are placeholders for upcoming sections.
@@ -19,11 +17,12 @@ const PILL_SHAPE = [0.55, 1, 0.7, 0.9] as const;
 
 interface SidebarProps {
   inert: boolean;
-  state: OrbState;
+  /** Short status for the conversation, e.g. "Listening…". */
+  status: string;
   getLevel: () => number;
 }
 
-export function Sidebar({ inert, state, getLevel }: SidebarProps) {
+export function Sidebar({ inert, status, getLevel }: SidebarProps) {
   return (
     <aside
       inert={inert}
@@ -60,7 +59,7 @@ export function Sidebar({ inert, state, getLevel }: SidebarProps) {
 
       <div className="glass flex w-fit items-center gap-2.5 rounded-full py-2 pl-3.5 pr-4">
         <span className="status-dot size-2 rounded-full" aria-hidden />
-        <span className="text-[13px] text-frost/90">{STATUS_LABEL[state]}</span>
+        <span className="text-[13px] text-frost/90">{status}</span>
         <Waveform getLevel={getLevel} shape={PILL_SHAPE} className="h-3.5 gap-[2px]" barClassName="w-[2px]" />
       </div>
     </aside>
