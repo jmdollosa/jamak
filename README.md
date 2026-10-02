@@ -43,6 +43,28 @@ The states panel (sliders button) still previews every orb state, and "Play samp
 conversation" and the panel's microphone switch run the simulated conversation, for
 design work without using the API.
 
+## Jamak's personality
+
+How Jamak talks lives in [`config/personality.md`](config/personality.md): plain
+Markdown, committed to Git, so every change can be reviewed, compared and rolled back.
+
+1. Edit `config/personality.md` and save it.
+2. If a conversation is open, end it (tap the orb, or press Esc).
+3. Start a new conversation. Jamak uses the saved version; there's no need to restart
+   the server or change any code. In development the server log says
+   `[personality] Loaded the updated config/personality.md.`
+
+A conversation that's already open keeps the personality it started with.
+
+- Write behavior, not settings. The voice, model and turn-taking live in
+  `server/voice/realtime.ts`, and changing the personality never touches them.
+- `<!-- comments -->` are for people editing the file and aren't sent to the model.
+- `{{user_name}}` is replaced with the name in `lib/assistant/config.ts`.
+- The file is sent to OpenAI and committed to Git: never put secrets or private details in it.
+- If the file goes missing or ends up empty while you're editing, new conversations keep
+  using the last version that loaded, and the server log says why. If it can't be loaded
+  at all, starting a conversation shows "Jamak's personality couldn't be loaded".
+
 ## How it works
 
 ```
@@ -52,12 +74,22 @@ mic + RTCPeerConnection ── SDP offer ─▶ POST /api/realtime/session ─ o
            ◀════ audio both ways, plus the "oai-events" data channel, direct to OpenAI ════▶
 ```
 
-The server only brokers the connection (OpenAI's "unified interface"), so the API key
-and the session config never reach the browser.
+The server only brokers the connection (OpenAI's "unified interface"), so the API key,
+the session config and the personality never reach the browser. When a conversation
+starts, the session's `instructions` are the personality and everything else is the
+voice configuration:
+
+```
+config/personality.md ─▶ loadPersonality() ─▶ session.instructions ─┐
+voice settings (model, voice, turn detection, transcription) ──────┴─▶ OpenAI Realtime
+```
 
 | File | |
 |---|---|
-| `app/api/realtime/session/route.ts` | Starts a session: model, voice, personality instructions, turn detection, transcription. |
+| `config/personality.md` | Jamak's personality and conversational behavior. |
+| `server/voice/personality.ts` | `loadPersonality()`: reads and checks the personality file. |
+| `server/voice/realtime.ts` | Voice configuration, and starting a session with OpenAI. |
+| `app/api/realtime/session/route.ts` | The HTTP endpoint the browser calls to start a conversation. |
 | `lib/assistant/realtime-voice.ts` | `RealtimeVoice`: one WebRTC conversation. Microphone, playback, event channel, voice levels, errors. |
 | `lib/assistant/assistant-controller.ts` | Maps Realtime events onto the orb states and captions; handles interrupting, hanging up and errors. |
 | `lib/assistant/level-meter.ts` | Loudness of the mic and of Jamak's voice, which drives the orb and the waveforms. |
