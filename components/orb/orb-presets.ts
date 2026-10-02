@@ -49,6 +49,14 @@ export interface OrbPreset {
   levelGain: number;
   /** Overall brightness of the internal light. */
   energy: number;
+  /** Radius of the particle shell, in sphere radii. */
+  particleShell: number;
+  /** Speed of the emerge → hold → disperse cycle (1 = 14s). */
+  particleSpeed: number;
+  /** How fast the particle shell tumbles, in radians per second. */
+  particleTumble: number;
+  /** Particle brightness. */
+  particleGlow: number;
 }
 
 function hex(value: string): RGB {
@@ -73,6 +81,10 @@ export const ORB_PRESETS: Record<OrbState, OrbPreset> = {
     breathe: 0.018,
     levelGain: 0,
     energy: 1,
+    particleShell: 1.38,
+    particleSpeed: 1.0,
+    particleTumble: 0.45,
+    particleGlow: 1.0,
   },
   listening: {
     deep: hex("#00384a"),
@@ -90,6 +102,10 @@ export const ORB_PRESETS: Record<OrbState, OrbPreset> = {
     breathe: 0.008,
     levelGain: 0.1,
     energy: 1.15,
+    particleShell: 1.28,
+    particleSpeed: 1.25,
+    particleTumble: 0.55,
+    particleGlow: 1.15,
   },
   thinking: {
     deep: hex("#1c0858"),
@@ -107,6 +123,10 @@ export const ORB_PRESETS: Record<OrbState, OrbPreset> = {
     breathe: 0.012,
     levelGain: 0,
     energy: 1.2,
+    particleShell: 1.32,
+    particleSpeed: 1.6,
+    particleTumble: 1.0,
+    particleGlow: 1.2,
   },
   speaking: {
     deep: hex("#0a1466"),
@@ -124,6 +144,10 @@ export const ORB_PRESETS: Record<OrbState, OrbPreset> = {
     breathe: 0.006,
     levelGain: 0.05,
     energy: 1.15,
+    particleShell: 1.4,
+    particleSpeed: 1.2,
+    particleTumble: 0.5,
+    particleGlow: 1.15,
   },
   empathetic: {
     deep: hex("#4a1500"),
@@ -141,6 +165,10 @@ export const ORB_PRESETS: Record<OrbState, OrbPreset> = {
     breathe: 0.022,
     levelGain: 0.03,
     energy: 0.95,
+    particleShell: 1.46,
+    particleSpeed: 0.7,
+    particleTumble: 0.28,
+    particleGlow: 1.0,
   },
   success: {
     deep: hex("#003f2a"),
@@ -158,6 +186,10 @@ export const ORB_PRESETS: Record<OrbState, OrbPreset> = {
     breathe: 0.012,
     levelGain: 0,
     energy: 1.1,
+    particleShell: 1.55,
+    particleSpeed: 1.3,
+    particleTumble: 0.6,
+    particleGlow: 1.35,
   },
 };
 

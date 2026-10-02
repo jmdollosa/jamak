@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { cx } from "@/lib/cx";
+import { CANVAS_EXTENT } from "./orb-geometry";
 import { OrbMotion } from "./orb-motion";
 import { ORB_KICKS, ORB_PRESETS, type OrbState } from "./orb-presets";
 import { OrbRenderer } from "./orb-renderer";
@@ -15,13 +17,13 @@ interface OrbProps {
 }
 
 const MAX_DPR = 2;
-const MAX_SIDE = 1600;
+const MAX_SIDE = 2400;
 const REDUCED_MOTION_SCALE = 0.3;
 
 /**
- * The liquid-energy orb. The canvas is 2.4× the sphere's diameter so the halo,
- * ripples and waveforms have room; size it with `className` and centre it on the
- * spot where the sphere should sit.
+ * The liquid-energy orb and its particle cloud. Place it inside a positioned box the
+ * size of the sphere; the canvas overflows that box (CANVAS_EXTENT× its size) to make
+ * room for the halo, waveforms and particles, and never takes pointer events.
  */
 export function Orb({ state, getLevel, renderScale = 1, className }: OrbProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -132,8 +134,14 @@ export function Orb({ state, getLevel, renderScale = 1, className }: OrbProps) {
   }, []);
 
   return (
-    <div ref={rootRef} className={className} data-gl="pending" aria-hidden>
-      <div className="orb-fallback" />
+    <div
+      ref={rootRef}
+      data-gl="pending"
+      aria-hidden
+      className={cx("pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2", className)}
+      style={{ width: `${CANVAS_EXTENT * 100}%`, height: `${CANVAS_EXTENT * 100}%` }}
+    >
+      <div className="orb-fallback" style={{ width: `${100 / CANVAS_EXTENT}%` }} />
       <canvas ref={canvasRef} className="absolute inset-0 size-full" />
     </div>
   );

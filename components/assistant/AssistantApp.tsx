@@ -166,12 +166,7 @@ export function AssistantApp() {
             }}
           >
             <div className="orb-ambient" />
-            <Orb
-              state={state}
-              getLevel={controller.getLevel}
-              renderScale={docked ? DOCKED_RENDER_SCALE : 1}
-              className="pointer-events-none absolute left-1/2 top-1/2 size-[240%] -translate-x-1/2 -translate-y-1/2"
-            />
+            <Orb state={state} getLevel={controller.getLevel} renderScale={docked ? DOCKED_RENDER_SCALE : 1} />
             <SuccessMark visible={state === "success"} />
             {/* Tap the orb itself to talk. It's the only control left when docked. */}
             <button

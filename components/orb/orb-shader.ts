@@ -1,3 +1,5 @@
+import { ORB_EXTENT } from "./orb-geometry";
+
 export const VERTEX_SHADER = /* glsl */ `
 attribute vec2 aPosition;
 
@@ -9,8 +11,9 @@ void main() {
 /**
  * The orb is drawn analytically on a full-canvas triangle.
  *
- * Space is normalised so the sphere has radius ~1 and the canvas spans ±EXTENT,
- * leaving room around it for the halo, ripples and speech waveforms.
+ * Space is normalised so the sphere has radius ~1 and this pass spans ±EXTENT,
+ * leaving room around it for the halo, ripples and speech waveforms. It draws into
+ * a square viewport at `uOrigin`, in the middle of the larger particle canvas.
  *
  * The "liquid" look comes from sampling a domain-warped, ridged noise field on
  * several translucent shells: the front of the sphere, its back wall seen through
@@ -21,6 +24,7 @@ export const FRAGMENT_SHADER = /* glsl */ `
 precision highp float;
 
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform float uTime;
 uniform float uRot;
 uniform float uWaveT;
@@ -39,7 +43,7 @@ uniform vec3 uPrimary;
 uniform vec3 uSecondary;
 uniform vec3 uHighlight;
 
-#define EXTENT 2.4
+#define EXTENT ${ORB_EXTENT.toFixed(2)}
 
 // 3D simplex noise by Ian McEwan and Stefan Gustavson (MIT licence).
 vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
@@ -141,7 +145,7 @@ vec2 field(vec3 q, float t) {
 
 void main() {
   float minRes = min(uRes.x, uRes.y);
-  vec2 p = (gl_FragCoord.xy - 0.5 * uRes) / (0.5 * minRes) * EXTENT;
+  vec2 p = (gl_FragCoord.xy - uOrigin - 0.5 * uRes) / (0.5 * minRes) * EXTENT;
   float px = 2.0 * EXTENT / minRes;
 
   float R = uRadius;
@@ -282,5 +286,94 @@ void main() {
 
   float alpha = max(inside, clamp(max(col.r, max(col.g, col.b)), 0.0, 1.0));
   gl_FragColor = vec4(min(col, vec3(alpha)), alpha);
+}
+`;
+
+/**
+ * A cloud of glowing points around the orb, after Nate Wiley's "Particle Orb CSS".
+ *
+ * Each particle spirals out of the centre to a shell around the sphere, holds there
+ * while the whole shell tumbles, then bursts outwards and fades, on a staggered loop.
+ * The spiral comes from growing the particle's angles along with its radius, the way
+ * CSS interpolates `rotateZ() rotateY() translateX()` from `none`.
+ */
+export const PARTICLE_VERTEX_SHADER = /* glsl */ `
+attribute vec3 aOrbit; // azimuth, elevation, stagger (fraction of a cycle)
+attribute vec3 aLook;  // colour position, size, random seed
+
+uniform vec2 uNdcScale;
+uniform float uPointPx;
+uniform float uCycle;
+uniform vec2 uTumble;
+uniform float uShell;
+uniform float uRadius;
+uniform float uBob;
+uniform float uLevel;
+uniform float uTime;
+uniform float uBright;
+uniform float uExtent;
+uniform vec3 uPrimary;
+uniform vec3 uSecondary;
+uniform vec3 uHighlight;
+
+varying vec3 vColor;
+
+const float PERSPECTIVE = 9.0;
+
+mat2 rot(float a) {
+  float c = cos(a);
+  float s = sin(a);
+  return mat2(c, s, -s, c);
+}
+
+void main() {
+  float phase = fract(uCycle - aOrbit.z);
+  float form = smoothstep(0.0, 0.3, phase);    // spiral out to the shell
+  float burst = smoothstep(0.8, 1.0, phase);   // fly outwards
+  float shown = smoothstep(0.0, 0.2, phase) * (1.0 - burst);
+
+  float drift = 1.0 + 0.025 * sin(uTime * (0.8 + aLook.z) + aLook.z * 40.0);
+  vec3 pos = vec3(uShell * form * mix(1.0, 2.2, burst) * drift, 0.0, 0.0);
+  pos.xz = rot(aOrbit.y * form) * pos.xz;
+  pos.xy = rot(-aOrbit.x * form) * pos.xy;
+  pos.yz = rot(uTumble.x) * pos.yz;
+  pos.xz = rot(uTumble.y) * pos.xz;
+
+  float persp = PERSPECTIVE / (PERSPECTIVE - pos.z);
+  vec2 q = pos.xy * persp;
+  vec2 screen = q + vec2(0.0, uBob);
+
+  // Particles inside or behind the sphere are hidden by it; the glass lets a glint through.
+  float zFront = sqrt(max(uRadius * uRadius - dot(q, q), 0.0));
+  float behind = 1.0 - smoothstep(zFront - 0.03, zFront + 0.03, pos.z);
+  float overDisk = 1.0 - smoothstep(uRadius * 0.97, uRadius * 1.03, length(q));
+  float occlusion = mix(1.0, 0.12, behind * overDisk);
+
+  float depth = clamp(pos.z / max(uShell, 0.001) * 0.5 + 0.5, 0.0, 1.0);
+  float twinkle = 0.7 + 0.3 * sin(uTime * (1.5 + aLook.z * 2.5) + aLook.z * 25.0);
+  float edge = smoothstep(uExtent, uExtent * 0.75, length(screen));
+
+  float alpha = shown * occlusion * mix(0.45, 1.0, depth) * twinkle * edge
+              * uBright * (1.0 + 0.6 * uLevel);
+  vColor = mix(mix(uPrimary, uSecondary, aLook.x), uHighlight, 0.35) * alpha;
+
+  // Park invisible particles off-screen so they cost nothing to shade.
+  gl_Position = alpha < 0.002 ? vec4(2.0, 2.0, 0.0, 1.0) : vec4(screen * uNdcScale, 0.0, 1.0);
+  gl_PointSize = clamp(uPointPx * aLook.y * persp * (1.0 + 0.3 * uLevel), 1.0, 64.0);
+}
+`;
+
+export const PARTICLE_FRAGMENT_SHADER = /* glsl */ `
+precision mediump float;
+
+varying vec3 vColor;
+
+void main() {
+  float d = length(gl_PointCoord - 0.5) * 2.0;
+  float core = 1.0 - smoothstep(0.12, 0.32, d);
+  float glow = exp(-d * d * 6.0) * 0.4;
+  vec3 col = vColor * (core * 1.4 + glow);
+  float a = clamp(max(col.r, max(col.g, col.b)), 0.0, 1.0);
+  gl_FragColor = vec4(min(col, vec3(a)), a);
 }
 `;

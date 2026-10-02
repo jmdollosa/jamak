@@ -93,7 +93,6 @@ body {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: calc(100% / 2.4);
   aspect-ratio: 1;
   translate: -50% -50%;
   border-radius: 50%;

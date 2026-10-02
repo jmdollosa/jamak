@@ -1,3 +1,4 @@
+import { PARTICLE_CYCLE_SECONDS } from "./orb-geometry";
 import type { OrbPreset, RGB } from "./orb-presets";
 
 /** Uniform values for a single rendered frame. */
@@ -15,6 +16,15 @@ export interface OrbFrame {
   ripple: number;
   wave: number;
   energy: number;
+  /** Seconds, slowed under reduced motion; drives twinkle and drift. */
+  clock: number;
+  /** Particle cycles elapsed. */
+  cycle: number;
+  tumbleX: number;
+  tumbleY: number;
+  /** Particle shell radius, following the sphere's own breathing and voice swell. */
+  shell: number;
+  sparkle: number;
   deep: RGB;
   primary: RGB;
   secondary: RGB;
@@ -39,6 +49,10 @@ const NUMERIC_KEYS: NumericKey[] = [
   "breathe",
   "levelGain",
   "energy",
+  "particleShell",
+  "particleSpeed",
+  "particleTumble",
+  "particleGlow",
 ];
 const COLOR_KEYS: ColorKey[] = ["deep", "primary", "secondary", "highlight"];
 
@@ -86,6 +100,12 @@ export class OrbMotion {
       ripple: initial.ripple,
       wave: initial.wave,
       energy: initial.energy,
+      clock: 0,
+      cycle: 0,
+      tumbleX: 0,
+      tumbleY: 0,
+      shell: initial.particleShell,
+      sparkle: initial.particleGlow,
       deep: this.current.deep,
       primary: this.current.primary,
       secondary: this.current.secondary,
@@ -136,6 +156,13 @@ export class OrbMotion {
     f.ripple = c.ripple;
     f.wave = c.wave;
     f.energy = c.energy;
+
+    f.clock = this.clock;
+    f.cycle += (dt * c.particleSpeed * m) / PARTICLE_CYCLE_SECONDS;
+    f.tumbleX += dt * c.particleTumble * 0.8 * m;
+    f.tumbleY += dt * c.particleTumble * m;
+    f.shell = this.radius * (c.particleShell + this.level * 0.15);
+    f.sparkle = c.particleGlow;
     return f;
   }
 }
