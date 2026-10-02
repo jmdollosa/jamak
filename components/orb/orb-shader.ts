@@ -164,14 +164,6 @@ void main() {
   float halo = (0.5 * exp(-d * 2.8) + 0.7 * exp(-d * 11.0)) * uGlow * edgeFade;
   vec3 outside = haloCol * halo;
 
-  // A thin band of light beneath the orb, as if it hovered over a glossy surface.
-  vec2 fl = vec2(p.x / 0.85, (p.y + 1.2) / 0.035);
-  vec2 fs = vec2(p.x / 1.3, (p.y + 1.2) / 0.2);
-  float flare = exp(-dot(fl, fl));
-  float flareSoft = exp(-dot(fs, fs));
-  float proximity = 1.0 - uBob * 6.0;
-  outside += mix(uPrimary, uHighlight, 0.4) * (flare * 0.75 + flareSoft * 0.22) * uGlow * proximity;
-
   // Ripple rings while listening.
   if (uRipple > 0.001) {
     vec2 e = vec2(q.x, q.y * 1.1) / R;
@@ -189,7 +181,8 @@ void main() {
       float ring = exp(-x * x) + 0.25 * exp(-abs(de - ringR) / (w * 6.0));
       rings += ring * pow(1.0 - ph, 1.7) * smoothstep(0.0, 0.1, ph);
     }
-    rings *= smoothstep(1.0, 1.06, de) * uRipple * (0.5 + 1.4 * uLevel);
+    // Kept light: the water around the orb carries most of the listening waves.
+    rings *= smoothstep(1.0, 1.06, de) * uRipple * (0.3 + 0.8 * uLevel);
     outside += mix(uPrimary, uHighlight, 0.45) * rings;
   }
 
@@ -219,6 +212,17 @@ void main() {
       innerMask = smoothstep(s2, s2 * 0.5, rr);
     }
 
+    // A luminous vortex deep inside: two arms curling into a bright core, seen through the
+    // glass (which magnifies it a little towards the rim) and turning with the orb.
+    vec2 sw = s * (1.0 - 0.12 * fres);
+    float swr = length(sw);
+    float spiral = atan(sw.y, sw.x) * 2.0 + log(swr + 0.08) * 2.6 - uRot * 2.4 - t * 0.3;
+    float wave = 0.5 + 0.5 * cos(spiral);
+    float breakup = 0.6 + 0.4 * snoise(vec3(sw * 2.2, t * 0.5));
+    float reachOut = smoothstep(0.95, 0.2, swr) * smoothstep(0.0, 0.12, swr);
+    float vortex = (pow(wave, 6.0) + 0.25 * pow(wave, 2.0)) * breakup * reachOut;
+    float heart = exp(-swr * swr * 16.0);
+
     // Smoky body: deep in the hollows, primary where the smoke thickens and at the rim.
     float smoke = front.y * 0.65 + inner.y * innerMask * 0.35;
     vec3 body = mix(uDeep, uPrimary, 0.25 + 0.6 * smoke + 0.3 * fres);
@@ -229,11 +233,17 @@ void main() {
     light += mix(strandCol, uSecondary * 1.5, acc) * front.x * (0.9 + 1.0 * fres);
     light += mix(uPrimary, uSecondary, 0.5) * back.x * 0.2;
     light += strandCol * inner.x * innerMask * 0.5;
+    vec3 vortexCol = mix(mix(uHighlight * 1.2, uPrimary * 1.9, smoothstep(0.05, 0.45, swr)), uSecondary * 1.8, smoothstep(0.3, 0.85, swr) * 0.7);
+    light += vortexCol * vortex * 1.3;
+    light += mix(uHighlight, uPrimary * 1.6, 0.35) * heart * (0.7 + 0.6 * uLevel);
 
     // Core glow swells with the voice.
     light += mix(uPrimary, uHighlight, 0.3) * exp(-rr * rr * 5.0) * (0.06 + 0.4 * uLevel);
 
     interior = body * (0.9 + 0.25 * uLevel) + light * uEnergy * (1.0 + 0.6 * uLevel);
+
+    // The glass is a little thicker towards its edge.
+    interior *= 1.0 - 0.18 * smoothstep(0.76, 0.9, rr) * smoothstep(0.99, 0.94, rr);
 
     // Rim light and a soft reflection on the upper left.
     vec3 rimCol = mix(mix(uHighlight, uPrimary, 0.5), uSecondary * 1.4, acc);
@@ -241,7 +251,16 @@ void main() {
 
     vec3 L = normalize(vec3(-0.55, 0.65, 0.55));
     float facing = max(dot(n, L), 0.0);
-    interior += uHighlight * (pow(facing, 40.0) * 0.45 + pow(facing, 8.0) * 0.08);
+    // A crisp reflection of a bright window, curving with the glass near its upper-left
+    // edge: the mark of glass.
+    float along = dot(s / max(rr, 1e-4), normalize(vec2(-0.6, 0.8)));
+    float window = smoothstep(0.87, 0.975, along) * smoothstep(0.07, 0.025, abs(rr - 0.8));
+    interior += mix(uHighlight, vec3(1.0), 0.6) * (window * 0.9 + pow(facing, 60.0) * 0.3)
+              + uHighlight * pow(facing, 8.0) * 0.08;
+    interior += mix(uHighlight, vec3(1.0), 0.3) * exp(-(1.0 - rr) / 0.01) * 0.4;
+    float focus = smoothstep(0.7, 0.92, rr) * smoothstep(0.995, 0.955, rr)
+                * smoothstep(0.3, 0.95, dot(s / max(rr, 1e-4), normalize(vec2(0.3, -0.95))));
+    interior += mix(uSecondary, uHighlight, 0.45) * focus * 0.35;
     float arc = smoothstep(0.82, 0.93, rr) * smoothstep(0.995, 0.95, rr)
               * smoothstep(0.2, 0.9, dot(s / max(rr, 1e-4), normalize(vec2(-0.6, 0.8))));
     interior += uHighlight * arc * 0.25;

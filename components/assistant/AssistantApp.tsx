@@ -1,8 +1,9 @@
 "use client";
 
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { Orb } from "@/components/orb/Orb";
 import { ORB_STATE_META, ORB_STATES } from "@/components/orb/orb-presets";
+import { WaterBackground } from "@/components/scene/WaterBackground";
 import type { Caption } from "@/lib/assistant/assistant-controller";
 import { ASSISTANT_NAME, USER_NAME } from "@/lib/assistant/config";
 import { useAssistant } from "@/lib/assistant/use-assistant";
@@ -91,7 +92,14 @@ export function AssistantApp() {
   const [typing, setTyping] = useState(false);
   const [statesOpen, setStatesOpen] = useState(false);
   const slotRef = useRef<HTMLDivElement>(null);
+  const rigRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
+
+  // Where the orb is on screen right now, including mid-way through docking.
+  const getOrbAnchor = useCallback(() => {
+    const rect = rigRef.current?.getBoundingClientRect();
+    return rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, radius: rect.width / 2 } : null;
+  }, []);
 
   const enterCompact = () => {
     if (!slotRef.current) return;
@@ -155,12 +163,14 @@ export function AssistantApp() {
       className="assistant relative z-10 flex h-dvh flex-col"
       style={{ "--aura": meta.aura, "--aura-2": meta.aura2 } as CSSProperties}
     >
+      <WaterBackground state={state} getLevel={controller.getLevel} getOrbAnchor={getOrbAnchor} />
       <TitleBar inert={compact} onCompact={enterCompact} />
       <Sidebar inert={compact} status={status} getLevel={controller.getLevel} />
 
       <main className="relative flex min-h-0 flex-1 flex-col items-center justify-center px-4 pb-[5vh]">
         <div ref={slotRef} className="orb-slot relative shrink-0">
           <div
+            ref={rigRef}
             className="orb-rig absolute inset-0"
             style={{ transform: compact ? compactTransform : undefined }}
             onTransitionEnd={(event) => {
@@ -169,7 +179,6 @@ export function AssistantApp() {
               }
             }}
           >
-            <div className="orb-ambient" />
             <Orb state={state} getLevel={controller.getLevel} renderScale={docked ? DOCKED_RENDER_SCALE : 1} />
             <SuccessMark visible={state === "success"} />
             {/* Tap the orb itself to talk. It's the only control left when docked. */}

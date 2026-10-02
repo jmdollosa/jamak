@@ -1,3 +1,4 @@
+import { createBuffer, link, locate, type Uniforms } from "@/lib/webgl";
 import { CANVAS_EXTENT, ORB_EXTENT, PARTICLE_COUNT, PARTICLE_SPRITE } from "./orb-geometry";
 import type { OrbFrame } from "./orb-motion";
 import {
@@ -49,57 +50,12 @@ const PARTICLE_UNIFORMS = [
 /** Floats per particle: orbit (azimuth, elevation, stagger) then look (tint, size, seed). */
 const PARTICLE_STRIDE = 6;
 
-type Uniforms<T extends string> = Record<T, WebGLUniformLocation | null>;
-
 interface Attribute {
   location: number;
   buffer: WebGLBuffer;
   size: number;
   stride: number;
   offset: number;
-}
-
-function compile(gl: WebGLRenderingContext, type: number, source: string) {
-  const shader = gl.createShader(type);
-  if (!shader) throw new Error("Could not create shader");
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    const log = gl.getShaderInfoLog(shader);
-    gl.deleteShader(shader);
-    throw new Error(`Orb shader failed to compile: ${log}`);
-  }
-  return shader;
-}
-
-function link(gl: WebGLRenderingContext, vertexSource: string, fragmentSource: string) {
-  const vertex = compile(gl, gl.VERTEX_SHADER, vertexSource);
-  const fragment = compile(gl, gl.FRAGMENT_SHADER, fragmentSource);
-  const program = gl.createProgram();
-  if (!program) throw new Error("Could not create program");
-  gl.attachShader(program, vertex);
-  gl.attachShader(program, fragment);
-  gl.linkProgram(program);
-  gl.deleteShader(vertex);
-  gl.deleteShader(fragment);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    const log = gl.getProgramInfoLog(program);
-    gl.deleteProgram(program);
-    throw new Error(`Orb program failed to link: ${log}`);
-  }
-  return program;
-}
-
-function locate<T extends string>(gl: WebGLRenderingContext, program: WebGLProgram, names: readonly T[]) {
-  return Object.fromEntries(names.map((name) => [name, gl.getUniformLocation(program, name)])) as Uniforms<T>;
-}
-
-function createBuffer(gl: WebGLRenderingContext, data: Float32Array) {
-  const buffer = gl.createBuffer();
-  if (!buffer) throw new Error("Could not create buffer");
-  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-  gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
-  return buffer;
 }
 
 /** Fixed per-particle values, from a seeded generator so the cloud looks the same every load. */

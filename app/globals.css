@@ -70,22 +70,9 @@ body {
   will-change: transform;
 }
 
-/* Light the scene around the orb in the current aura colour. */
-.orb-ambient {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 520%;
-  aspect-ratio: 1;
-  translate: -50% -50%;
-  border-radius: 50%;
-  pointer-events: none;
-  background: radial-gradient(
-    closest-side,
-    color-mix(in oklab, var(--aura) 24%, transparent),
-    color-mix(in oklab, var(--aura) 8%, transparent) 42%,
-    transparent 74%
-  );
+/* The water, until its first frame or if WebGL is unavailable. */
+.water {
+  background: radial-gradient(ellipse at 50% 42%, #0c1832 0%, #050a19 55%, #02040b 100%);
 }
 
 /* Shown only if WebGL is unavailable. */
@@ -221,16 +208,6 @@ body {
 
 .word {
   transition: opacity 260ms ease;
-}
-
-.twinkle {
-  animation: twinkle 5s ease-in-out infinite;
-}
-
-@keyframes twinkle {
-  50% {
-    opacity: 0.15;
-  }
 }
 
 .fade-away {
